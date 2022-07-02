@@ -44,6 +44,7 @@ const (
 	// Identifiers (TPIDs).
 	EtherTypeVLAN        EtherType = 0x8100
 	EtherTypeServiceVLAN EtherType = 0x88a8
+	EtherTypeMPLSUnicast EtherType = 0x8847
 )
 
 // A Frame is an IEEE 802.3 Ethernet II frame.  A Frame contains information
@@ -77,6 +78,8 @@ type Frame struct {
 	// EtherType is a value used to identify an upper layer protocol
 	// encapsulated in this Frame.
 	EtherType EtherType
+
+	MPLS []*MPLS
 
 	// Payload is a variable length data payload encapsulated by this Frame.
 	Payload []byte
@@ -145,6 +148,14 @@ func (f *Frame) read(b []byte) (int, error) {
 		n += 4
 	}
 
+	for _, mpls := range f.MPLS {
+		binary.BigEndian.PutUint16(b[n:n+2], uint16(EtherTypeMPLSUnicast))
+		if _, err := mpls.read(b[n+2 : n+6]); err != nil {
+			return 0, err
+		}
+		n += 6
+	}
+
 	// Marshal actual EtherType after any VLANs, copy payload into
 	// output bytes.
 	binary.BigEndian.PutUint16(b[n:n+2], uint16(f.EtherType))
@@ -175,6 +186,12 @@ func (f *Frame) UnmarshalBinary(b []byte) error {
 			return err
 		}
 
+		n += nn
+	case EtherTypeMPLSUnicast:
+		nn, err := f.unmarshallMPLS(b[n:])
+		if err != nil {
+			return err
+		}
 		n += nn
 	default:
 		// No VLANs detected.
@@ -239,13 +256,30 @@ func (f *Frame) length() int {
 	case f.VLAN != nil:
 		vlanLen = 4
 	}
+	mplsLen := len(f.MPLS) * 4
 
 	// 6 bytes: destination hardware address
 	// 6 bytes: source hardware address
 	// N bytes: VLAN tags (if present)
 	// 2 bytes: EtherType
 	// N bytes: payload length (may be padded)
-	return 6 + 6 + vlanLen + 2 + pl
+	return 6 + 6 + vlanLen + 2 + pl + mplsLen
+}
+
+func (f *Frame) unmarshallMPLS(b []byte) (int, error) {
+	n := 0
+	for EtherType(binary.BigEndian.Uint16(b[n:])) == EtherTypeMPLSUnicast {
+		mpls := new(MPLS)
+		if err := mpls.UnmarshalBinary(b[n+2 : n+6]); err != nil {
+			return 0, err
+		}
+		f.MPLS = append(f.MPLS, mpls)
+		n += 6
+	}
+	f.EtherType = EtherType(binary.BigEndian.Uint16(b[n : n+2]))
+	n += 2
+
+	return n, nil
 }
 
 // unmarshalVLANs unmarshals S/C-VLAN tags.  It is assumed that tpid
