@@ -134,7 +134,7 @@ func (f *Frame) read(b []byte) (int, error) {
 		{vlan: f.VLAN, tpid: EtherTypeVLAN},
 	}
 
-	n := 10
+	n := 12
 	for _, vt := range vlans {
 		if vt.vlan == nil {
 			continue
@@ -165,7 +165,7 @@ func (f *Frame) read(b []byte) (int, error) {
 		binary.BigEndian.PutUint16(b[n:n+2], uint16(f.EtherType))
 		n += 2
 	}
-	copy(b[n+2:], f.Payload)
+	copy(b[n:], f.Payload)
 
 	return len(b), nil
 }
