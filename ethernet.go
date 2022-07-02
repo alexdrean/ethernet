@@ -134,7 +134,7 @@ func (f *Frame) read(b []byte) (int, error) {
 		{vlan: f.VLAN, tpid: EtherTypeVLAN},
 	}
 
-	n := 12
+	n := 10
 	for _, vt := range vlans {
 		if vt.vlan == nil {
 			continue
@@ -148,17 +148,23 @@ func (f *Frame) read(b []byte) (int, error) {
 		n += 4
 	}
 
-	for _, mpls := range f.MPLS {
+	if len(f.MPLS) != 0 {
 		binary.BigEndian.PutUint16(b[n:n+2], uint16(EtherTypeMPLSUnicast))
-		if _, err := mpls.read(b[n+2 : n+6]); err != nil {
+		n += 2
+	}
+	for _, mpls := range f.MPLS {
+		if _, err := mpls.read(b[n : n+4]); err != nil {
 			return 0, err
 		}
-		n += 6
+		n += 4
 	}
 
 	// Marshal actual EtherType after any VLANs, copy payload into
 	// output bytes.
-	binary.BigEndian.PutUint16(b[n:n+2], uint16(f.EtherType))
+	if f.EtherType != 0 {
+		binary.BigEndian.PutUint16(b[n:n+2], uint16(f.EtherType))
+		n += 2
+	}
 	copy(b[n+2:], f.Payload)
 
 	return len(b), nil
@@ -188,7 +194,7 @@ func (f *Frame) UnmarshalBinary(b []byte) error {
 
 		n += nn
 	case EtherTypeMPLSUnicast:
-		nn, err := f.unmarshallMPLS(b[n:])
+		nn, err := f.unmarshalMPLS(b[n:])
 		if err != nil {
 			return err
 		}
@@ -257,16 +263,24 @@ func (f *Frame) length() int {
 		vlanLen = 4
 	}
 	mplsLen := len(f.MPLS) * 4
+	if len(f.MPLS) > 0 {
+		mplsLen += 2
+	}
+
+	etherTypeLen := 0
+	if f.EtherType != 0 {
+		etherTypeLen += 2
+	}
 
 	// 6 bytes: destination hardware address
 	// 6 bytes: source hardware address
 	// N bytes: VLAN tags (if present)
 	// 2 bytes: EtherType
 	// N bytes: payload length (may be padded)
-	return 6 + 6 + vlanLen + 2 + pl + mplsLen
+	return 6 + 6 + vlanLen + etherTypeLen + pl + mplsLen
 }
 
-func (f *Frame) unmarshallMPLS(b []byte) (int, error) {
+func (f *Frame) unmarshalMPLS(b []byte) (int, error) {
 	n := 0
 	for EtherType(binary.BigEndian.Uint16(b[n:])) == EtherTypeMPLSUnicast {
 		mpls := new(MPLS)
