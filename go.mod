@@ -1,4 +1,4 @@
-module github.com/mdlayher/ethernet
+module github.com/alexdrean/ethernet
 
 go 1.12
 
